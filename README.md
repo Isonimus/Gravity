@@ -35,7 +35,7 @@ Status bar colors indicate quota health:
 ### From Source
 ```bash
 # Clone the repository
-git clone https://github.com/iker/Gravity.git
+git clone https://github.com/isonimus/Gravity.git
 cd Gravity
 
 # Install dependencies
