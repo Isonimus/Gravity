@@ -111,8 +111,8 @@ export class StatusBarManager implements vscode.Disposable {
             this.item.text = `${guardIcon} ${parts.join(' | ')}`;
         }
 
-        // Set background color based on guard level
-        this.item.backgroundColor = this.getBackgroundColor(guardState.level);
+        // Set colors based on guard level
+        this.applyColors(guardState.level);
 
         // Build tooltip
         this.item.tooltip = this.buildTooltip(snapshot, guardState, config);
@@ -130,15 +130,22 @@ export class StatusBarManager implements vscode.Disposable {
         return '$(check)';
     }
 
-    private getBackgroundColor(level: string): vscode.ThemeColor | undefined {
+    private applyColors(level: string): void {
         switch (level) {
             case 'blocked':
             case 'critical':
-                return new vscode.ThemeColor('statusBarItem.errorBackground');
+                this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                this.item.color = undefined;
+                break;
             case 'warning':
-                return new vscode.ThemeColor('statusBarItem.warningBackground');
+                this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+                this.item.color = undefined;
+                break;
             default:
-                return undefined;
+                // Green foreground for healthy state (no green background available in VS Code API)
+                this.item.backgroundColor = undefined;
+                this.item.color = '#89d185';
+                break;
         }
     }
 
