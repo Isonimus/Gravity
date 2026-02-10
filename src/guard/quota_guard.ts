@@ -23,9 +23,9 @@ export class QuotaGuard {
     private config: GravityConfig;
     private guardState: GuardState;
     private acknowledgments: Map<string, { level: GuardLevel, timestamp: number, percentage: number }> = new Map();
+    private lastSeenPercentages: Map<string, number> = new Map();
     private lastBlockShown: number = 0;
     private readonly blockCooldown = 15000; // 15 seconds global cooldown for blocks
-    private readonly hushDuration = 300000; // 5 minutes "hush" duration after "Proceed Anyway"
 
     constructor(config: GravityConfig) {
         this.config = config;
@@ -44,6 +44,29 @@ export class QuotaGuard {
     }
 
     updateSnapshot(snapshot: QuotaSnapshot): GuardState {
+        // Detect resets: if current percentage > last seen percentage, the quota has reset
+        for (const model of snapshot.models) {
+            const currentPct = model.remainingPercentage ?? 100;
+            const lastPct = this.lastSeenPercentages.get(model.modelId);
+
+            if (lastPct !== undefined && currentPct > lastPct) {
+                logger.info(LOG_CAT, `Quota reset detected for ${model.label} (${lastPct.toFixed(1)}% -> ${currentPct.toFixed(1)}%)`);
+                this.acknowledgments.delete(model.modelId);
+                this.acknowledgments.delete('prompt_credits'); // Also clear prompt credits ack if anything resets
+            }
+            this.lastSeenPercentages.set(model.modelId, currentPct);
+        }
+
+        // Special check for prompt credits
+        if (snapshot.promptCredits) {
+            const currentPct = snapshot.promptCredits.remainingPercentage;
+            const lastPct = this.lastSeenPercentages.get('prompt_credits');
+            if (lastPct !== undefined && currentPct > lastPct) {
+                this.acknowledgments.delete('prompt_credits');
+            }
+            this.lastSeenPercentages.set('prompt_credits', currentPct);
+        }
+
         this.lastSnapshot = snapshot;
         this.guardState = this.analyzeQuotaState(snapshot);
 
@@ -233,14 +256,15 @@ export class QuotaGuard {
         const now = Date.now();
         const levelOrder: Record<GuardLevel, number> = { 'normal': 0, 'warning': 1, 'critical': 2, 'blocked': 3 };
 
-        // If level has worsened, ALWAYS show
+        // If level has worsened, ALWAYS show (e.g. Warning -> Critical)
         if (levelOrder[check.level] > levelOrder[ack.level]) {
             return true;
         }
 
-        // If it's a block/critical and we're in the hush period
-        if (ack.level === 'critical' || ack.level === 'blocked') {
-            return now - ack.timestamp > this.hushDuration;
+        // For critical/blocked, we suppress indefinitely until the quota resets (handled in updateSnapshot)
+        // or the level worsened (handled above).
+        if (check.level === 'critical' || check.level === 'blocked') {
+            return false;
         }
 
         // For warnings, show again if it's been more than 10 minutes or percentage dropped significantly (>5%)
@@ -355,15 +379,14 @@ export class QuotaGuard {
 
         return lines.join('\n');
     }
-
     /**
-     * Clear old acknowledgments (e.g., after quota reset)
+     * Clear old acknowledgments (e.g., after long time)
      */
     clearDismissedWarnings(): void {
         const now = Date.now();
         for (const [id, ack] of this.acknowledgments.entries()) {
-            // If it's old (1 hour), clear it
-            if (now - ack.timestamp > 3600000) {
+            // Keep warnings for 1 hour maximum, but critical/blocked stay until reset (handled in updateSnapshot)
+            if (ack.level === 'warning' && now - ack.timestamp > 3600000) {
                 this.acknowledgments.delete(id);
             }
         }
