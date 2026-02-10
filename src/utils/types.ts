@@ -62,6 +62,7 @@ export interface GravityConfig {
     blockThreshold: number;
     pollingInterval: number;
     guardEnabled: boolean;
+    soundEnabled: boolean;
     pinnedModels: string[];
 }
 

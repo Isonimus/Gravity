@@ -119,7 +119,10 @@ export class QuotaManager {
 
             logger.debug(LOG_CAT, 'Quota fetched:', {
                 modelsCount: snapshot.models.length,
-                promptCredits: snapshot.promptCredits,
+                promptCredits: snapshot.promptCredits ? `${snapshot.promptCredits.remainingPercentage.toFixed(1)}%` : 'N/A',
+                lowestModel: snapshot.models.length > 0
+                    ? `${snapshot.models.reduce((min, m) => (m.remainingPercentage ?? 100) < (min.remainingPercentage ?? 100) ? m : min).label}: ${(snapshot.models.reduce((min, m) => (min.remainingPercentage ?? 100) < (min.remainingPercentage ?? 100) ? min : m).remainingPercentage ?? 100).toFixed(1)}%`
+                    : 'none',
                 timestamp: snapshot.timestamp.toISOString(),
             });
 
@@ -174,7 +177,7 @@ export class QuotaManager {
                     label: m.label,
                     modelId: m.modelOrAlias?.model || 'unknown',
                     remainingFraction,
-                    remainingPercentage: remainingFraction !== undefined ? remainingFraction * 100 : undefined,
+                    remainingPercentage: remainingFraction !== undefined ? remainingFraction * 100 : 0, // Default to 0 if info exists but fraction missing
                     isExhausted: remainingFraction === 0,
                     resetTime,
                     timeUntilReset: diff,
@@ -190,7 +193,7 @@ export class QuotaManager {
     }
 
     private formatTime(ms: number, resetTime: Date): string {
-        if (ms <= 0) {return 'Ready';}
+        if (ms <= 0) { return 'Ready'; }
 
         const mins = Math.ceil(ms / 60000);
         let duration = '';

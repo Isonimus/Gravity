@@ -77,6 +77,12 @@
           "description": "Enable quota protection (show warnings/blocks when thresholds reached)",
           "order": 5
         },
+        "gravity.soundEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play an alert sound when quota warnings or blocks are triggered",
+          "order": 6
+        },
         "gravity.pinnedModels": {
           "type": "array",
           "default": [],
@@ -84,7 +90,7 @@
             "type": "string"
           },
           "description": "Model IDs to display in the status bar. If empty, shows worst quota.",
-          "order": 6
+          "order": 7
         }
       }
     }

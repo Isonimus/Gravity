@@ -13,10 +13,11 @@ export class ConfigManager {
 
         return {
             enabled: config.get<boolean>('enabled', true),
-            warningThreshold: config.get<number>('warningThreshold', 10),
+            warningThreshold: config.get<number>('warningThreshold', 20),
             blockThreshold: config.get<number>('blockThreshold', 2),
             pollingInterval: config.get<number>('pollingInterval', 120) * 1000, // Convert to ms
             guardEnabled: config.get<boolean>('guardEnabled', true),
+            soundEnabled: config.get<boolean>('soundEnabled', true),
             pinnedModels: config.get<string[]>('pinnedModels', []),
         };
     }

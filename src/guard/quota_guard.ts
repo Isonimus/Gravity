@@ -14,6 +14,7 @@ import {
     GravityConfig,
 } from '../utils/types';
 import { logger } from '../utils/logger';
+import { playAlertSound } from '../utils/sound';
 
 const LOG_CAT = 'QuotaGuard';
 
@@ -21,9 +22,10 @@ export class QuotaGuard {
     private lastSnapshot?: QuotaSnapshot;
     private config: GravityConfig;
     private guardState: GuardState;
-    private dismissedWarnings: Set<string> = new Set();
+    private acknowledgments: Map<string, { level: GuardLevel, timestamp: number, percentage: number }> = new Map();
     private lastBlockShown: number = 0;
-    private readonly blockCooldown = 30000; // 30 seconds between block modals
+    private readonly blockCooldown = 15000; // 15 seconds global cooldown for blocks
+    private readonly hushDuration = 300000; // 5 minutes "hush" duration after "Proceed Anyway"
 
     constructor(config: GravityConfig) {
         this.config = config;
@@ -92,6 +94,10 @@ export class QuotaGuard {
 
         const check = this.checkModel(worstModel);
 
+        if (!this.shouldShowAlert(check)) {
+            return true;
+        }
+
         if (check.shouldBlock) {
             return await this.showBlockModal(check);
         } else if (check.shouldWarn) {
@@ -119,6 +125,31 @@ export class QuotaGuard {
             }
         }
 
+        // Check prompt credits if available
+        if (snapshot.promptCredits) {
+            const pcPct = snapshot.promptCredits.remainingPercentage;
+
+            // Create virtual model for prompt credits
+            const pcVirtualModel: ModelQuotaInfo = {
+                label: 'Global Prompt Credits',
+                modelId: 'prompt_credits',
+                remainingPercentage: pcPct,
+                isExhausted: pcPct <= 0,
+                resetTime: new Date(Date.now() + 3600000), // Placeholder
+                timeUntilReset: 3600000,
+                timeUntilResetFormatted: 'this billing cycle',
+            };
+
+            if (pcPct < lowestQuota) {
+                lowestQuota = pcPct;
+                lowestQuotaModel = pcVirtualModel;
+            }
+
+            if (pcPct <= this.config.warningThreshold) {
+                modelsAtRisk.push(pcVirtualModel);
+            }
+        }
+
         let level: GuardLevel = 'normal';
         if (lowestQuota <= 0) {
             level = 'blocked';
@@ -140,10 +171,28 @@ export class QuotaGuard {
     private getModelsRequiringAttention(): ModelQuotaInfo[] {
         if (!this.lastSnapshot) { return []; }
 
-        return this.lastSnapshot.models.filter((model) => {
+        const atRisk: ModelQuotaInfo[] = this.lastSnapshot.models.filter((model) => {
             const pct = model.remainingPercentage ?? 100;
             return pct <= this.config.warningThreshold;
         });
+
+        // Add prompt credits if at risk
+        if (this.lastSnapshot.promptCredits) {
+            const pcPct = this.lastSnapshot.promptCredits.remainingPercentage;
+            if (pcPct <= this.config.warningThreshold) {
+                atRisk.push({
+                    label: 'Global Prompt Credits',
+                    modelId: 'prompt_credits',
+                    remainingPercentage: pcPct,
+                    isExhausted: pcPct <= 0,
+                    resetTime: new Date(Date.now() + 3600000),
+                    timeUntilReset: 3600000,
+                    timeUntilResetFormatted: 'this billing cycle',
+                });
+            }
+        }
+
+        return atRisk;
     }
 
     private checkModel(model: ModelQuotaInfo): GuardCheckResult {
@@ -175,12 +224,36 @@ export class QuotaGuard {
         return { shouldWarn, shouldBlock, level, model, message };
     }
 
-    private async showWarningModal(check: GuardCheckResult): Promise<boolean> {
-        const warningKey = `${check.model.modelId}-${Math.floor(Date.now() / 60000)}`; // Per minute
-
-        // Don't spam warnings for the same model
-        if (this.dismissedWarnings.has(warningKey)) {
+    private shouldShowAlert(check: GuardCheckResult): boolean {
+        const ack = this.acknowledgments.get(check.model.modelId);
+        if (!ack) {
             return true;
+        }
+
+        const now = Date.now();
+        const levelOrder: Record<GuardLevel, number> = { 'normal': 0, 'warning': 1, 'critical': 2, 'blocked': 3 };
+
+        // If level has worsened, ALWAYS show
+        if (levelOrder[check.level] > levelOrder[ack.level]) {
+            return true;
+        }
+
+        // If it's a block/critical and we're in the hush period
+        if (ack.level === 'critical' || ack.level === 'blocked') {
+            return now - ack.timestamp > this.hushDuration;
+        }
+
+        // For warnings, show again if it's been more than 10 minutes or percentage dropped significantly (>5%)
+        const beenLongEnough = now - ack.timestamp > 600000;
+        const droppedSignificantly = (ack.percentage - (check.model.remainingPercentage ?? 0)) > 5;
+
+        return beenLongEnough || droppedSignificantly;
+    }
+
+    private async showWarningModal(check: GuardCheckResult): Promise<boolean> {
+        // Play alert sound if enabled
+        if (this.config.soundEnabled) {
+            playAlertSound('warning');
         }
 
         const result = await vscode.window.showWarningMessage(
@@ -195,12 +268,12 @@ export class QuotaGuard {
             return false;
         }
 
-        if (result === 'Continue') {
-            this.dismissedWarnings.add(warningKey);
-            return true;
-        }
+        this.acknowledgments.set(check.model.modelId, {
+            level: check.level,
+            timestamp: Date.now(),
+            percentage: check.model.remainingPercentage ?? 0
+        });
 
-        // Dismissed without action - allow but don't suppress future warnings
         return true;
     }
 
@@ -221,6 +294,11 @@ export class QuotaGuard {
 
         const resetInfo = check.model.timeUntilResetFormatted;
 
+        // Play alert sound if enabled
+        if (this.config.soundEnabled) {
+            playAlertSound('critical');
+        }
+
         const result = await vscode.window.showErrorMessage(
             check.message,
             { modal: true },
@@ -230,6 +308,11 @@ export class QuotaGuard {
 
         if (result === 'Proceed Anyway') {
             logger.warn(LOG_CAT, `User forced through block for ${check.model.label}`);
+            this.acknowledgments.set(check.model.modelId, {
+                level: check.level,
+                timestamp: Date.now(),
+                percentage: check.model.remainingPercentage ?? 0
+            });
             return true;
         }
 
@@ -274,9 +357,15 @@ export class QuotaGuard {
     }
 
     /**
-     * Clear dismissed warnings (e.g., after quota refresh)
+     * Clear old acknowledgments (e.g., after quota reset)
      */
     clearDismissedWarnings(): void {
-        this.dismissedWarnings.clear();
+        const now = Date.now();
+        for (const [id, ack] of this.acknowledgments.entries()) {
+            // If it's old (1 hour), clear it
+            if (now - ack.timestamp > 3600000) {
+                this.acknowledgments.delete(id);
+            }
+        }
     }
 }
