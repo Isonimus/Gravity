@@ -16,8 +16,8 @@ type SoundType = 'warning' | 'critical';
 /** Platform-specific sound commands */
 const SOUND_COMMANDS: Record<string, Record<SoundType, string>> = {
     linux: {
-        warning: 'canberra-gtk-play -i dialog-warning --description="Gravity Warning" 2>/dev/null || pw-play --volume=0.5 /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null || paplay --volume=32768 /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null || ffplay -nodisp -autoexit -volume 50 /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null',
-        critical: 'canberra-gtk-play -i dialog-error --description="Gravity Alert" 2>/dev/null || pw-play --volume=0.5 /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null || paplay --volume=32768 /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null || ffplay -nodisp -autoexit -volume 50 /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null',
+        warning: 'canberra-gtk-play -i dialog-warning --description="Gravity Warning" 2>/dev/null || pw-play --volume=0.15 /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null || paplay /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null || ffplay -nodisp -autoexit -loglevel quiet -volume 30 /usr/share/sounds/freedesktop/stereo/dialog-warning.oga 2>/dev/null',
+        critical: 'canberra-gtk-play -i dialog-error --description="Gravity Alert" 2>/dev/null || pw-play --volume=0.15 /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null || paplay /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null || ffplay -nodisp -autoexit -loglevel quiet -volume 30 /usr/share/sounds/freedesktop/stereo/dialog-error.oga 2>/dev/null',
     },
     darwin: {
         warning: 'afplay /System/Library/Sounds/Funk.aiff',

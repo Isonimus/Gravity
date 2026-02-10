@@ -25,6 +25,7 @@ export class QuotaGuard {
     private acknowledgments: Map<string, { level: GuardLevel, timestamp: number, percentage: number }> = new Map();
     private lastSeenPercentages: Map<string, number> = new Map();
     private lastBlockShown: number = 0;
+    private isShowingAlert: boolean = false;
     private readonly blockCooldown = 15000; // 15 seconds global cooldown for blocks
 
     constructor(config: GravityConfig) {
@@ -50,9 +51,8 @@ export class QuotaGuard {
             const lastPct = this.lastSeenPercentages.get(model.modelId);
 
             if (lastPct !== undefined && currentPct >= lastPct + 2.0) {
-                logger.info(LOG_CAT, `Quota reset detected for ${model.label} (${lastPct.toFixed(1)}% -> ${currentPct.toFixed(1)}%)`);
+                logger.info(LOG_CAT, `Quota reset detected for ${model.label} (${model.modelId}): ${lastPct.toFixed(1)}% -> ${currentPct.toFixed(1)}%. Clearing ack.`);
                 this.acknowledgments.delete(model.modelId);
-                this.acknowledgments.delete('prompt_credits'); // Also clear prompt credits ack if anything resets
             }
             this.lastSeenPercentages.set(model.modelId, currentPct);
         }
@@ -62,6 +62,7 @@ export class QuotaGuard {
             const currentPct = snapshot.promptCredits.remainingPercentage;
             const lastPct = this.lastSeenPercentages.get('prompt_credits');
             if (lastPct !== undefined && currentPct >= lastPct + 2.0) {
+                logger.info(LOG_CAT, `Prompt credits reset detected: ${lastPct.toFixed(1)}% -> ${currentPct.toFixed(1)}%. Clearing ack.`);
                 this.acknowledgments.delete('prompt_credits');
             }
             this.lastSeenPercentages.set('prompt_credits', currentPct);
@@ -99,32 +100,54 @@ export class QuotaGuard {
      */
     async checkAndWarn(): Promise<boolean> {
         if (!this.guardState.guardActive) {
-            return true; // Allow action
+            return true;
         }
 
+        if (this.isShowingAlert) {
+            logger.debug(LOG_CAT, 'Alert already in progress, skipping checkAndWarn');
+            return true;
+        }
+
+        this.isShowingAlert = true;
+        try {
+            const result = await this.performCheckAndWarn();
+            return result;
+        } finally {
+            this.isShowingAlert = false;
+        }
+    }
+
+    private async performCheckAndWarn(): Promise<boolean> {
         const modelsAtRisk = this.getModelsRequiringAttention();
 
         if (modelsAtRisk.length === 0) {
             return true; // All clear
         }
 
-        // Get the worst model (lowest quota)
-        const worstModel = modelsAtRisk.reduce((worst, current) => {
-            const worstPct = worst.remainingPercentage ?? 100;
-            const currentPct = current.remainingPercentage ?? 100;
-            return currentPct < worstPct ? current : worst;
-        });
+        // Build check results for ALL at-risk models
+        const checks = modelsAtRisk.map((m) => this.checkModel(m));
 
-        const check = this.checkModel(worstModel);
+        // Filter to only models that should actually show an alert (not already acknowledged)
+        const unsuppressed = checks.filter((c) => (c.shouldWarn || c.shouldBlock) && this.shouldShowAlert(c));
 
-        if (!this.shouldShowAlert(check)) {
+        if (unsuppressed.length === 0) {
+            logger.debug(LOG_CAT, `All ${checks.length} at-risk model(s) are already acknowledged. No alert.`);
             return true;
         }
 
-        if (check.shouldBlock) {
-            return await this.showBlockModal(check);
-        } else if (check.shouldWarn) {
-            return await this.showWarningModal(check);
+        // Pick the worst unsuppressed model
+        const worst = unsuppressed.reduce((w, c) => {
+            const wPct = w.model.remainingPercentage ?? 100;
+            const cPct = c.model.remainingPercentage ?? 100;
+            return cPct < wPct ? c : w;
+        });
+
+        logger.debug(LOG_CAT, `Alerting for ${worst.model.label} (${worst.level}, ${worst.model.remainingPercentage?.toFixed(1)}%). ${unsuppressed.length} unsuppressed of ${checks.length} total.`);
+
+        if (worst.shouldBlock) {
+            return await this.showBlockModal(worst);
+        } else if (worst.shouldWarn) {
+            return await this.showWarningModal(worst);
         }
 
         return true;
@@ -250,6 +273,7 @@ export class QuotaGuard {
     private shouldShowAlert(check: GuardCheckResult): boolean {
         const ack = this.acknowledgments.get(check.model.modelId);
         if (!ack) {
+            logger.debug(LOG_CAT, `No ack found for ${check.model.label} (${check.model.modelId}), showing alert.`);
             return true;
         }
 
@@ -258,18 +282,23 @@ export class QuotaGuard {
 
         // If level has worsened, ALWAYS show (e.g. Warning -> Critical)
         if (levelOrder[check.level] > levelOrder[ack.level]) {
+            logger.debug(LOG_CAT, `Level worsened for ${check.model.label}: ${ack.level} -> ${check.level}. Showing alert.`);
             return true;
         }
 
         // For critical/blocked, we suppress indefinitely until the quota resets (handled in updateSnapshot)
         // or the level worsened (handled above).
         if (check.level === 'critical' || check.level === 'blocked') {
+            logger.debug(LOG_CAT, `Suppressed recurring alert for ${check.model.label} (${check.level}) because it was acknowledged at ${new Date(ack.timestamp).toISOString()}`);
             return false;
         }
 
         // For warnings, show again if it's been more than 10 minutes or percentage dropped significantly (>5%)
         const beenLongEnough = now - ack.timestamp > 600000;
         const droppedSignificantly = (ack.percentage - (check.model.remainingPercentage ?? 0)) > 5;
+
+        if (beenLongEnough) { logger.debug(LOG_CAT, `Reshowing warning for ${check.model.label} - time limit reached.`); }
+        if (droppedSignificantly) { logger.debug(LOG_CAT, `Reshowing warning for ${check.model.label} - dropped significantly (>5% drift).`); }
 
         return beenLongEnough || droppedSignificantly;
     }
@@ -287,6 +316,8 @@ export class QuotaGuard {
             'Show Details'
         );
 
+        logger.debug(LOG_CAT, `Warning alert for ${check.model.label} acknowledged with result: ${result}`);
+
         if (result === 'Show Details') {
             vscode.commands.executeCommand('gravity.showStatus');
             return false;
@@ -297,6 +328,8 @@ export class QuotaGuard {
             timestamp: Date.now(),
             percentage: check.model.remainingPercentage ?? 0
         });
+
+        logger.debug(LOG_CAT, `Set acknowledgment for ${check.model.label} (${check.model.modelId}) at level ${check.level}`);
 
         return true;
     }
@@ -330,11 +363,15 @@ export class QuotaGuard {
             `Wait for Reset (${resetInfo})`
         );
 
+        logger.debug(LOG_CAT, `Block alert for ${check.model.label} acknowledged with result: ${result}`);
+
         this.acknowledgments.set(check.model.modelId, {
             level: check.level,
             timestamp: Date.now(),
             percentage: check.model.remainingPercentage ?? 0
         });
+
+        logger.debug(LOG_CAT, `Set acknowledgment for ${check.model.label} (${check.model.modelId}) at level ${check.level}`);
 
         if (result === 'Proceed Anyway') {
             logger.warn(LOG_CAT, `User forced through block for ${check.model.label}`);
