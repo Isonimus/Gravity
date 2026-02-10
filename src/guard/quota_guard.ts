@@ -114,7 +114,7 @@ export class QuotaGuard {
                 lowestQuotaModel = model;
             }
 
-            if (pct < this.config.warningThreshold) {
+            if (pct <= this.config.warningThreshold) {
                 modelsAtRisk.push(model);
             }
         }
@@ -122,9 +122,9 @@ export class QuotaGuard {
         let level: GuardLevel = 'normal';
         if (lowestQuota <= 0) {
             level = 'blocked';
-        } else if (lowestQuota < this.config.blockThreshold) {
+        } else if (lowestQuota <= this.config.blockThreshold) {
             level = 'critical';
-        } else if (lowestQuota < this.config.warningThreshold) {
+        } else if (lowestQuota <= this.config.warningThreshold) {
             level = 'warning';
         }
 
@@ -138,11 +138,11 @@ export class QuotaGuard {
     }
 
     private getModelsRequiringAttention(): ModelQuotaInfo[] {
-        if (!this.lastSnapshot) {return [];}
+        if (!this.lastSnapshot) { return []; }
 
         return this.lastSnapshot.models.filter((model) => {
             const pct = model.remainingPercentage ?? 100;
-            return pct < this.config.warningThreshold;
+            return pct <= this.config.warningThreshold;
         });
     }
 
@@ -159,13 +159,13 @@ export class QuotaGuard {
             level = 'blocked';
             shouldBlock = true;
             message = `⛔ ${model.label} quota is EXHAUSTED!\nReset in: ${model.timeUntilResetFormatted}`;
-        } else if (pct < blockThreshold) {
+        } else if (pct <= blockThreshold) {
             level = 'critical';
             shouldBlock = true;
             message = `🚨 CRITICAL: ${model.label} is at ${pct.toFixed(1)}%!\n` +
                 `Continuing may trigger a cooldown penalty.\n` +
                 `Reset in: ${model.timeUntilResetFormatted}`;
-        } else if (pct < warningThreshold) {
+        } else if (pct <= warningThreshold) {
             level = 'warning';
             shouldWarn = true;
             message = `⚠️ Warning: ${model.label} is at ${pct.toFixed(1)}%\n` +
@@ -261,7 +261,7 @@ export class QuotaGuard {
 
         for (const model of this.lastSnapshot.models) {
             const pct = model.remainingPercentage ?? 0;
-            const icon = pct <= 0 ? '⛔' : pct < this.config.blockThreshold ? '🚨' : pct < this.config.warningThreshold ? '⚠️' : '✅';
+            const icon = pct <= 0 ? '⛔' : pct <= this.config.blockThreshold ? '🚨' : pct <= this.config.warningThreshold ? '⚠️' : '✅';
             lines.push(`${icon} ${model.label}: ${pct.toFixed(1)}%`);
         }
 

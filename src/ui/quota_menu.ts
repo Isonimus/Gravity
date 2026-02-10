@@ -27,7 +27,7 @@ export class QuotaMenu {
         config: GravityConfig
     ): Promise<void> {
         const quickPick = vscode.window.createQuickPick<ModelQuickPickItem>();
-        quickPick.title = '$(rocket) Gravity - Quota Status';
+        quickPick.title = 'Gravity - Quota Status';
         quickPick.placeholder = 'Select a model to pin/unpin from status bar';
         quickPick.matchOnDescription = true;
         quickPick.matchOnDetail = true;
@@ -168,9 +168,9 @@ export class QuotaMenu {
     private getStatusIcon(percentage: number, config: GravityConfig): string {
         if (percentage <= 0) {
             return '$(error)';
-        } else if (percentage < config.blockThreshold) {
+        } else if (percentage <= config.blockThreshold) {
             return '$(flame)';
-        } else if (percentage < config.warningThreshold) {
+        } else if (percentage <= config.warningThreshold) {
             return '$(warning)';
         }
         return '$(check)';

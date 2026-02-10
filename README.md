@@ -4,8 +4,6 @@
 
 A lightweight VS Code/Antigravity extension that monitors your AI model quota usage and warns you before you hit the cooldown threshold.
 
-![Gravity Icon](assets/icon.png)
-
 ## Features
 
 ### 🛡️ Quota Protection

@@ -56,6 +56,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         statusBar.update(snapshot, guardState, currentConfig);
 
+        // Proactively trigger warnings/blocks when quota is low
+        if (guardState.guardActive && guardState.level !== 'normal') {
+            quotaGuard.checkAndWarn();
+        }
+
         // Clear dismissed warnings on refresh
         quotaGuard.clearDismissedWarnings();
     });

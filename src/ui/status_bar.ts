@@ -122,9 +122,9 @@ export class StatusBarManager implements vscode.Disposable {
     private getStatusIcon(percentage: number, config: GravityConfig): string {
         if (percentage <= 0) {
             return '$(error)';
-        } else if (percentage < config.blockThreshold) {
+        } else if (percentage <= config.blockThreshold) {
             return '$(flame)';
-        } else if (percentage < config.warningThreshold) {
+        } else if (percentage <= config.warningThreshold) {
             return '$(warning)';
         }
         return '$(check)';
