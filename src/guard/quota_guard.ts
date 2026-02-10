@@ -49,7 +49,7 @@ export class QuotaGuard {
             const currentPct = model.remainingPercentage ?? 100;
             const lastPct = this.lastSeenPercentages.get(model.modelId);
 
-            if (lastPct !== undefined && currentPct > lastPct) {
+            if (lastPct !== undefined && currentPct >= lastPct + 2.0) {
                 logger.info(LOG_CAT, `Quota reset detected for ${model.label} (${lastPct.toFixed(1)}% -> ${currentPct.toFixed(1)}%)`);
                 this.acknowledgments.delete(model.modelId);
                 this.acknowledgments.delete('prompt_credits'); // Also clear prompt credits ack if anything resets
@@ -61,7 +61,7 @@ export class QuotaGuard {
         if (snapshot.promptCredits) {
             const currentPct = snapshot.promptCredits.remainingPercentage;
             const lastPct = this.lastSeenPercentages.get('prompt_credits');
-            if (lastPct !== undefined && currentPct > lastPct) {
+            if (lastPct !== undefined && currentPct >= lastPct + 2.0) {
                 this.acknowledgments.delete('prompt_credits');
             }
             this.lastSeenPercentages.set('prompt_credits', currentPct);
@@ -330,13 +330,14 @@ export class QuotaGuard {
             `Wait for Reset (${resetInfo})`
         );
 
+        this.acknowledgments.set(check.model.modelId, {
+            level: check.level,
+            timestamp: Date.now(),
+            percentage: check.model.remainingPercentage ?? 0
+        });
+
         if (result === 'Proceed Anyway') {
             logger.warn(LOG_CAT, `User forced through block for ${check.model.label}`);
-            this.acknowledgments.set(check.model.modelId, {
-                level: check.level,
-                timestamp: Date.now(),
-                percentage: check.model.remainingPercentage ?? 0
-            });
             return true;
         }
 

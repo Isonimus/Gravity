@@ -144,6 +144,14 @@ export class QuotaManager {
     }
 
     private parseResponse(data: ServerUserStatusResponse): QuotaSnapshot {
+        if (!data || !data.userStatus) {
+            logger.warn(LOG_CAT, 'Empty or invalid user status response');
+            return {
+                timestamp: new Date(),
+                models: [],
+            };
+        }
+
         const userStatus = data.userStatus;
         const planInfo = userStatus.planStatus?.planInfo;
         const availableCredits = userStatus.planStatus?.availablePromptCredits;
