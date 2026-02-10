@@ -2,7 +2,7 @@
   "name": "gravity",
   "displayName": "Gravity",
   "description": "Antigravity quota guardian - monitors AI model usage and protects you from cooldown penalties",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "Isonimus",
   "icon": "assets/icon.png",
   "engines": {
